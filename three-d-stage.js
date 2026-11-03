@@ -75,6 +75,7 @@
       overflow: hidden;
     }
     canvas { display: block; outline: none; }
+    .toolbar, .note { display: none !important; }
     .toolbar {
       position: absolute;
       right: 16px;
