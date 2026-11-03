@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Particle Bonsai</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js",
+    "three/addons/exporters/OBJExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js",
+    "three/addons/exporters/GLTFExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js": "sha384-nbwtoZENJD3Vq+ACK0CuGQdPMuDWHkamC2KJD70EV5nfg6jQjfppKOea07YJN+N3",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js": "sha384-VofkvpG6HERhFCYbsUOHeNXBCqID2nfqkQqnVzE1jc/oPcz+qJ13ADdXH08hE+cQ"
+  }
+}
+</script>
+<style>
+html,body{margin:0;height:100%;background:transparent}
+three-d-stage:not(:defined){visibility:hidden}
+</style>
+</head>
+<body>
+<three-d-stage name="particle-bonsai" background="transparent" autorotate></three-d-stage>
+<script src="./three-d-stage.js"></script>
+
+<script type="module">
+const stage = document.querySelector('three-d-stage');
+const { THREE } = await stage.ready;
+const V = THREE.Vector3;
+
+let seed = 20261102;
+const rnd = () => (seed = (seed * 16807) % 2147483647, (seed - 1) / 2147483646);
+const R = (a, b) => a + (b - a) * rnd();
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const randUnit = () => { const u = R(-1, 1), a = R(0, Math.PI * 2), s = Math.sqrt(1 - u * u); return new V(s * Math.cos(a), u, s * Math.sin(a)); };
+
+const bucket = () => ({ pos: [], idx: [] });
+const B = { trunk: bucket(), branches: bucket(), twigs: bucket(), roots: bucket(), foliage: bucket(), dust: bucket(), floating: bucket() };
+const PD = new Map([[B.trunk, 85000], [B.branches, 70000], [B.twigs, 38000], [B.roots, 38000]]);
+
+// particle shell along a tapered path — no solid surface, just a cloud that implies the bark
+function tube(b, pts, radii, seg, rough = 0) {
+  const D = PD.get(b) ?? 150000, n = pts.length, ph = R(0, 10);
+  for (let i = 1; i < n; i++) {
+    const t = new V().subVectors(pts[i], pts[i - 1]); const L = t.length(); t.normalize();
+    const r = (radii[i] + radii[i - 1]) / 2;
+    let cnt = Math.max(0.6, 2 * Math.PI * r * L * D); cnt = Math.floor(cnt) + (rnd() < cnt % 1 ? 1 : 0);
+    const nrm = Math.abs(t.y) > 0.9 ? new V(1, 0, 0) : new V(0, 1, 0);
+    nrm.addScaledVector(t, -nrm.dot(t)).normalize();
+    const bin = new V().crossVectors(t, nrm);
+    for (let k = 0; k < cnt; k++) {
+      const a = R(0, Math.PI * 2), f = rnd();
+      const ridge = 1 + rough * (Math.sin(a * 3 + i * 0.35 + ph) * 0.6 + Math.sin(a * 7 - i * 0.8 + ph) * 0.3);
+      const rr = r * ridge * (rnd() < 0.8 ? R(0.9, 1.25) : R(0.2, 0.9));
+      const c = pts[i - 1].clone().lerp(pts[i], f).addScaledVector(nrm, Math.cos(a) * rr).addScaledVector(bin, Math.sin(a) * rr);
+      particle(b, c, clamp(r * 0.12, 0.0009, 0.0026) * R(0.7, 1.3), R(0.4, 1));
+    }
+  }
+}
+function tubeSolid(b, pts, radii, seg, rough = 0) {
+  const n = pts.length, base = b.pos.length / 3;
+  const T = pts.map((_, i) => new V().subVectors(pts[Math.min(i + 1, n - 1)], pts[Math.max(i - 1, 0)]).normalize());
+  const nrm = Math.abs(T[0].y) > 0.9 ? new V(1, 0, 0) : new V(0, 1, 0);
+  const ph = R(0, 10), tmp = new V();
+  for (let i = 0; i < n; i++) {
+    nrm.addScaledVector(T[i], -nrm.dot(T[i])).normalize();
+    const bin = new V().crossVectors(T[i], nrm);
+    for (let j = 0; j < seg; j++) {
+      const a = j / seg * Math.PI * 2;
+      const r = radii[i] * (1 + rough * (Math.sin(a * 3 + i * 0.35 + ph) * 0.6 + Math.sin(a * 7 - i * 0.8 + ph) * 0.3 + Math.sin(a * 13 + i * 1.7) * 0.15));
+      tmp.copy(pts[i]).addScaledVector(nrm, Math.cos(a) * r).addScaledVector(bin, Math.sin(a) * r);
+      b.pos.push(tmp.x, tmp.y, tmp.z);
+    }
+  }
+  for (let i = 0; i < n - 1; i++) for (let j = 0; j < seg; j++) {
+    const a = base + i * seg + j, c = base + i * seg + (j + 1) % seg, d = base + (i + 1) * seg + j, e = base + (i + 1) * seg + (j + 1) % seg;
+    b.idx.push(a, c, d, c, e, d);
+  }
+  const tip = pts[n - 1].clone().addScaledVector(T[n - 1], radii[n - 1]);
+  const ti = b.pos.length / 3; b.pos.push(tip.x, tip.y, tip.z);
+  const last = base + (n - 1) * seg;
+  for (let j = 0; j < seg; j++) b.idx.push(last + j, last + (j + 1) % seg, ti);
+}
+
+const TET = [[-1,-1,-1],[-1,-1,1],[-1,1,-1],[-1,1,1],[1,-1,-1],[1,-1,1],[1,1,-1],[1,1,1]];
+const TF = [0,1,3,0,3,2, 4,7,5,4,6,7, 0,4,5,0,5,1, 2,7,6,2,3,7, 0,2,6,0,6,4, 1,7,3,1,5,7];
+const q = new THREE.Quaternion(), eul = new THREE.Euler(), pv = new V();
+function particle(b, c, size) {
+  size *= 0.62;
+  q.setFromEuler(eul.set(R(0, 6.3), R(0, 6.3), R(0, 6.3)));
+  const i0 = b.pos.length / 3;
+  for (const v of TET) { pv.set(v[0] * size, v[1] * size, v[2] * size).applyQuaternion(q).add(c); b.pos.push(pv.x, pv.y, pv.z); }
+  for (const f of TF) b.idx.push(i0 + f);
+}
+
+function dustAlong(pts, radii, dens) {
+  for (let i = 1; i < pts.length; i++) {
+    const t = new V().subVectors(pts[i], pts[i - 1]).normalize();
+    let cnt = radii[i] * dens; cnt = Math.floor(cnt) + (rnd() < cnt % 1 ? 1 : 0);
+    for (let k = 0; k < cnt; k++) {
+      const u = randUnit(); u.addScaledVector(t, -u.dot(t)).normalize();
+      const c = pts[i - 1].clone().lerp(pts[i], rnd()).addScaledVector(u, radii[i] * R(1.0, 1.18));
+      particle(B.dust, c, clamp(radii[i] * 0.14, 0.0012, 0.0035), R(0.4, 1));
+    }
+  }
+}
+
+function grow(o) {
+  const steps = clamp(Math.round(o.len / 0.008), 5, 30), step = o.len / steps;
+  const pts = [o.start.clone()], radii = [o.r0];
+  const d = o.dir.clone().normalize(); let p = o.start.clone();
+  for (let i = 1; i <= steps; i++) {
+    d.x += R(-1, 1) * o.wig; d.y += R(-1, 1) * o.wig * 0.6 + o.tend; d.z += R(-1, 1) * o.wig; d.normalize();
+    p = p.clone().addScaledVector(d, step); pts.push(p);
+    radii.push(lerp(o.r0, o.r1, Math.pow(i / steps, 0.8)));
+  }
+  const seg = o.seg ?? clamp(Math.round(o.r0 * 480), 4, 16);
+  tube(o.b, pts, radii, seg, o.rough ?? 0.06);
+  if (o.dust) dustAlong(pts, radii, o.dust);
+  return { pts, radii, dir: d };
+}
+
+const tips = [];
+function branch(start, dir, len, r, depth, maxD) {
+  const res = grow({ start, dir, len, r0: r, r1: Math.max(r * 0.35, 0.0007), wig: depth ? 0.32 : 0.2, tend: depth >= 1 ? 0.035 : -0.006,
+    b: depth === 0 ? B.branches : B.twigs, dust: depth === 0 ? 90 : 55, rough: depth === 0 ? 0.1 : 0.04 });
+  tips.push({ p: res.pts.at(-1), s: len, depth });
+  if (depth >= maxD || r < 0.0018) return;
+  const kids = depth === 0 ? Math.round(R(5, 7)) : Math.round(R(3, 4));
+  const n = res.pts.length;
+  for (let k = 0; k < kids; k++) {
+    const idx = clamp(Math.round(lerp(0.3, 0.95, (k + rnd() * 0.6) / kids) * (n - 1)), 1, n - 2);
+    const sd = new V().subVectors(res.pts[idx + 1], res.pts[idx - 1]).normalize();
+    const perp = new V().crossVectors(sd, new V(0, 1, 0)).normalize().multiplyScalar(k % 2 ? 1 : -1);
+    const nd = sd.clone().multiplyScalar(0.6).addScaledVector(perp, R(0.4, 0.9)).add(new V(0, R(-0.05, 0.25), 0));
+    branch(res.pts[idx], nd, len * R(0.42, 0.62), res.radii[idx] * 0.62, depth + 1, maxD);
+  }
+}
+
+// trunk — twisting informal-upright S curve with root flare
+const trunkCurve = new THREE.CatmullRomCurve3([
+  new V(0, 0, 0), new V(0.03, 0.07, 0.01), new V(-0.025, 0.15, -0.01), new V(0.035, 0.23, -0.025),
+  new V(0.0, 0.31, 0.01), new V(-0.03, 0.39, 0.0), new V(-0.005, 0.46, 0.01), new V(0.01, 0.52, 0)
+]);
+const tr = t => 0.016 + 0.034 * Math.pow(1 - t, 1.4) + 0.035 * Math.exp(-t * 22);
+const TN = 70, tPts = [], tRad = [];
+for (let i = 0; i < TN; i++) { const t = i / (TN - 1); tPts.push(trunkCurve.getPointAt(t)); tRad.push(tr(t)); }
+tube(B.trunk, tPts, tRad, 32, 0.14);
+dustAlong(tPts, tRad, 60);
+
+const levels = Array.from({ length: 16 }, (_, i) => 0.18 + i * 0.05 + R(-0.012, 0.012));
+levels.forEach((t, i) => {
+  const az = i * 2.399 + R(-0.3, 0.3);
+  const dir = new V(Math.cos(az), R(-0.18, 0.02), Math.sin(az));
+  branch(trunkCurve.getPointAt(t), dir, 0.5 * (1 - t * 0.72) * R(0.85, 1.1), tr(t) * 0.55, 0, 3);
+});
+branch(trunkCurve.getPointAt(0.97), new V(0.1, 1, 0.05), 0.08, tr(0.97) * 0.8, 1, 3);
+
+// foliage clouds: particle flakes in domed ellipsoids around every tip
+for (const tp of tips) {
+  if (tp.depth < 2) continue;
+  const rx = clamp(tp.s * 0.9, 0.016, 0.05) * R(0.8, 1.15), ry = rx * 0.5;
+  const c = tp.p.clone().add(new V(0, ry * 0.25, 0));
+  const count = Math.round(rx * rx * 17000);
+  for (let k = 0; k < count; k++) {
+    const u = randUnit(); if (u.y < -0.45) u.y = -u.y * 0.5;
+    const r = Math.pow(rnd(), 0.6);
+    particle(B.foliage, new V(c.x + u.x * rx * r, c.y + u.y * ry * r, c.z + u.z * rx * r), R(0.0014, 0.0032), R(0.25, 0.5));
+  }
+  for (let k = 0; k < 2; k++) {
+    const d = randUnit(); d.y = Math.abs(d.y) * 0.5;
+    grow({ start: tp.p, dir: d, len: rx * R(0.5, 0.9), r0: 0.0011, r1: 0.0004, wig: 0.4, tend: 0.02, b: B.twigs, seg: 4, rough: 0 });
+  }
+  const strays = Math.round(count * 0.04);
+  for (let k = 0; k < strays; k++) {
+    const u = randUnit(); u.y = Math.abs(u.y);
+    particle(B.floating, c.clone().add(new V(u.x * rx * R(1.1, 1.7), u.y * ry * R(1.2, 2.4), u.z * rx * R(1.1, 1.7))), R(0.0012, 0.0024), 0.5);
+  }
+}
+
+// exposed root system
+function root(start, dir, len, r, depth) {
+  const res = grow({ start, dir, len, r0: r, r1: Math.max(r * 0.3, 0.0005), wig: 0.32 + depth * 0.06, tend: -0.05 - depth * 0.01,
+    b: B.roots, dust: depth < 2 ? 70 : 0, rough: depth === 0 ? 0.1 : 0.03 });
+  if (depth >= 3) return;
+  const kids = Math.round(R(2, depth === 0 ? 5 : 4)), n = res.pts.length;
+  for (let k = 0; k < kids; k++) {
+    const idx = clamp(Math.round(R(0.2, 0.9) * (n - 1)), 1, n - 2);
+    const sd = new V().subVectors(res.pts[idx + 1], res.pts[idx - 1]).normalize();
+    const nd = sd.addScaledVector(randUnit(), 0.75).add(new V(0, -0.35, 0));
+    root(res.pts[idx], nd, len * R(0.45, 0.65), res.radii[idx] * 0.58, depth + 1);
+  }
+}
+const RN = 18;
+for (let i = 0; i < RN; i++) {
+  const a = i / RN * Math.PI * 2 + R(-0.15, 0.15), sp = R(0.25, 0.85);
+  const start = new V(Math.cos(a) * 0.035, R(0.0, 0.025), Math.sin(a) * 0.035);
+  root(start, new V(Math.cos(a) * sp, -1, Math.sin(a) * sp), R(0.26, 0.42), R(0.011, 0.02), 0);
+}
+// root collar band of packed particles
+for (let k = 0; k < 1400; k++) {
+  const a = R(0, Math.PI * 2), y = R(-0.012, 0.022), rr = 0.07 - y * 0.6 + R(-0.003, 0.006);
+  particle(B.dust, new V(Math.cos(a) * rr, y, Math.sin(a) * rr), R(0.0015, 0.0032), R(0.5, 1));
+}
+
+// assemble
+const mats = {
+  bark: new THREE.MeshStandardMaterial({ name: 'black_bark', color: 0x151515, roughness: 0.5, metalness: 0.2, flatShading: true }),
+  leaf: new THREE.MeshStandardMaterial({ name: 'black_foliage', color: 0x0c0c0c, roughness: 0.38, metalness: 0.25, flatShading: true }),
+  dust: new THREE.MeshStandardMaterial({ name: 'graphite_dust', color: 0x2c2c2c, roughness: 0.3, metalness: 0.35, flatShading: true })
+};
+const parts = [['trunk', B.trunk, mats.bark], ['branches', B.branches, mats.bark], ['twigs', B.twigs, mats.bark], ['roots', B.roots, mats.bark],
+  ['foliage_particles', B.foliage, mats.leaf], ['bark_particles', B.dust, mats.dust], ['floating_particles', B.floating, mats.leaf]];
+
+const box = new THREE.Box3();
+for (const [, b] of parts) for (let i = 0; i < b.pos.length; i += 3) box.expandByPoint(pv.set(b.pos[i], b.pos[i + 1], b.pos[i + 2]));
+const off = new V(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
+
+const model = new THREE.Group(); model.name = 'particle_bonsai';
+for (const [name, b, mat] of parts) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+  g.setIndex(b.idx);
+  g.translate(off.x, off.y, off.z);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat); m.name = name; m.castShadow = true; m.receiveShadow = true;
+  model.add(m);
+}
+stage.setObject(model);
+
+</script>
+</body>
+</html>
