@@ -23,6 +23,7 @@
 <style>
 html,body{margin:0;height:100%;background:transparent}
 three-d-stage:not(:defined){visibility:hidden}
+three-d-stage{pointer-events:none}
 </style>
 </head>
 <body>
@@ -234,6 +235,7 @@ for (const [name, b, mat] of parts) {
   model.add(m);
 }
 stage.setObject(model);
+if (stage._controls) stage._controls.enabled = false;
 
 </script>
 </body>
