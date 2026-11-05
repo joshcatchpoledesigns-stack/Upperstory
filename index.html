@@ -236,7 +236,7 @@ for (const [name, b, mat] of parts) {
 }
 stage.setObject(model);
 stage._key.position.set(1.2, 10, 1.5);
-{ const c = stage._camera, t = stage._controls.target, d = c.position.distanceTo(t); c.position.set(t.x + d * 0.62, t.y + d * 0.08, t.z + d * 0.78); stage._controls.update(); }
+{ const c = stage._camera, t = stage._controls.target, d = c.position.distanceTo(t) / 1.25; c.position.set(t.x + d * 0.62, t.y + d * 0.08, t.z + d * 0.78); stage._controls.update(); }
 if (stage._controls) stage._controls.enabled = false;
 
 </script>
